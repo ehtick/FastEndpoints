@@ -79,8 +79,14 @@ sealed partial class OperationTransformer(DocumentOptions docOpts, SharedContext
         // handle [FromBody]/[FromForm] request body replacement + JSON Patch unwrap
         var promotedBodyPropertyName = _requestTransformer.ApplyBodyOverrides(operation, epDef, operationKey);
 
-        // apply endpoint-scoped validation to request body schemas after request body shape is finalized
-        _validationTransformer.ApplyEndpointValidation(operation, context.ApplicationServices, epDef.ValidatorType, operationKey, promotedBodyPropertyName?.Name);
+        // apply endpoint-scoped validation to request body and DTO-bound parameter schemas after request shape is finalized
+        _validationTransformer.ApplyEndpointValidation(
+            operation,
+            context.ApplicationServices,
+            epDef.ValidatorType,
+            operationKey,
+            requestTransformState,
+            promotedBodyPropertyName?.Name);
 
         // apply parameter descriptions from EndpointSummary.Params and defaults from [DefaultValue]
         _requestTransformer.ApplyParameterMetadata(operation, epDef);

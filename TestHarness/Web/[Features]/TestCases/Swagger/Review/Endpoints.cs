@@ -1370,3 +1370,103 @@ sealed class QueryMethodReviewEndpoint : Endpoint<QueryMethodReviewRequest, stri
     public override Task HandleAsync(QueryMethodReviewRequest req, CancellationToken ct)
         => Send.OkAsync(req.Name, ct);
 }
+
+sealed class QueryParamValidationReviewRequest
+{
+    public string Id { get; set; }
+
+    [BindFrom("q")]
+    public string? Term { get; set; }
+
+    public int Page { get; set; }
+
+    public string? OptionalFilter { get; set; }
+
+    public string? ConditionalName { get; set; }
+}
+
+sealed class QueryParamValidationReviewValidator : Validator<QueryParamValidationReviewRequest>
+{
+    public QueryParamValidationReviewValidator()
+    {
+        RuleFor(x => x.Id).MinimumLength(2);
+        RuleFor(x => x.Term).NotEmpty().MinimumLength(3);
+        RuleFor(x => x.Page).GreaterThan(0);
+        RuleFor(x => x.OptionalFilter).MaximumLength(20);
+        RuleFor(x => x.ConditionalName).NotEmpty().When(x => x.Page > 10);
+    }
+}
+
+sealed class QueryParamValidationReviewEndpoint : Endpoint<QueryParamValidationReviewRequest>
+{
+    public override void Configure()
+    {
+        Get("/swagger-review/query-param-validation/{id}");
+        Tags("swagger_review");
+        AllowAnonymous();
+    }
+
+    public override Task HandleAsync(QueryParamValidationReviewRequest r, CancellationToken ct)
+        => Send.OkAsync(ct);
+}
+
+sealed class QueryParamValidationMixedReviewRequest
+{
+    [QueryParam]
+    public string? Search { get; set; }
+
+    [FromHeader("X-Client", isRequired: false, removeFromSchema: true)]
+    public string? Client { get; set; }
+
+    public string BodyValue { get; set; } = string.Empty;
+}
+
+sealed class QueryParamValidationMixedReviewValidator : Validator<QueryParamValidationMixedReviewRequest>
+{
+    public QueryParamValidationMixedReviewValidator()
+    {
+        RuleFor(x => x.Search).NotEmpty().MinimumLength(2);
+        RuleFor(x => x.Client).NotEmpty().MinimumLength(2);
+        RuleFor(x => x.BodyValue).MinimumLength(5);
+    }
+}
+
+sealed class QueryParamValidationMixedReviewEndpoint : Endpoint<QueryParamValidationMixedReviewRequest>
+{
+    public override void Configure()
+    {
+        Post("/swagger-review/query-param-validation-mixed");
+        Tags("swagger_review");
+        AllowAnonymous();
+    }
+
+    public override Task HandleAsync(QueryParamValidationMixedReviewRequest req, CancellationToken ct)
+        => Send.OkAsync(ct);
+}
+
+sealed class QueryParamValidationNamesReviewRequest
+{
+    [JsonPropertyName("search_term")]
+    public string? SearchTerm { get; set; }
+}
+
+sealed class QueryParamValidationNamesReviewValidator : Validator<QueryParamValidationNamesReviewRequest>
+{
+    public QueryParamValidationNamesReviewValidator()
+    {
+        RuleFor(x => x.SearchTerm).NotEmpty().MinimumLength(4);
+    }
+}
+
+sealed class QueryParamValidationNamesReviewEndpoint : Endpoint<QueryParamValidationNamesReviewRequest>
+{
+    public override void Configure()
+    {
+        Get("/swagger-review/query-param-validation-names");
+        Tags("swagger_review");
+        AllowAnonymous();
+    }
+
+    public override Task HandleAsync(QueryParamValidationNamesReviewRequest r, CancellationToken ct)
+        => Send.OkAsync(ct);
+}

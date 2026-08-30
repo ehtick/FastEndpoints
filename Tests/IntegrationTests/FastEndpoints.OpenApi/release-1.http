@@ -605,6 +605,26 @@ Accept: application/json
   }
 }
 
+### swagger_review_TestCasesSwaggerReviewQueryParamValidationMixedReviewEndpoint
+POST {{baseUrl}}/api/swagger-review/query-param-validation-mixed?search={{search}}
+X-Client: {{X-Client}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "bodyValue": ""
+}
+
+### swagger_review_TestCasesSwaggerReviewQueryParamValidationNamesReviewEndpoint
+GET {{baseUrl}}/api/swagger-review/query-param-validation-names?searchTerm={{searchTerm}}
+Accept: application/json
+
+
+### swagger_review_TestCasesSwaggerReviewQueryParamValidationReviewEndpoint
+GET {{baseUrl}}/api/swagger-review/query-param-validation/{{id}}?q={{q}}&page={{page}}&optionalFilter={{optionalFilter}}&conditionalName={{conditionalName}}
+Accept: application/json
+
+
 ### swagger_review_TestCasesSwaggerReviewRequiredQueryParamReviewEndpoint
 POST {{baseUrl}}/api/swagger-review/required-query-param?search={{search}}&filter={{filter}}
 Content-Type: application/json

@@ -2987,6 +2987,168 @@
         }
       }
     },
+    "/api/swagger-review/query-param-validation-mixed": {
+      "post": {
+        "tags": [
+          "SwaggerReview"
+        ],
+        "operationId": "swagger_review_TestCasesSwaggerReviewQueryParamValidationMixedReviewEndpoint",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 2,
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Client",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "minLength": 2,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestCasesSwaggerReviewQueryParamValidationMixedReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FastEndpointsErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/swagger-review/query-param-validation-names": {
+      "get": {
+        "tags": [
+          "SwaggerReview"
+        ],
+        "operationId": "swagger_review_TestCasesSwaggerReviewQueryParamValidationNamesReviewEndpoint",
+        "parameters": [
+          {
+            "name": "searchTerm",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 4,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FastEndpointsErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/swagger-review/query-param-validation/{id}": {
+      "get": {
+        "tags": [
+          "SwaggerReview"
+        ],
+        "operationId": "swagger_review_TestCasesSwaggerReviewQueryParamValidationReviewEndpoint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "minLength": 2,
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "minLength": 3,
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "optionalFilter",
+            "in": "query",
+            "schema": {
+              "maxLength": 20,
+              "minLength": 0,
+              "type": [
+                "null",
+                "string"
+              ]
+            }
+          },
+          {
+            "name": "conditionalName",
+            "in": "query",
+            "schema": {
+              "type": [
+                "null",
+                "string"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FastEndpointsErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/swagger-review/required-query-param": {
       "post": {
         "tags": [
@@ -7173,6 +7335,7 @@
             "in": "query",
             "required": true,
             "schema": {
+              "exclusiveMinimum": 10,
               "type": "integer",
               "format": "int32"
             }
@@ -10524,6 +10687,15 @@
           "name": "example name",
           "child": {
             "code": "xy"
+          }
+        }
+      },
+      "TestCasesSwaggerReviewQueryParamValidationMixedReviewRequest": {
+        "type": "object",
+        "properties": {
+          "bodyValue": {
+            "minLength": 5,
+            "type": "string"
           }
         }
       },

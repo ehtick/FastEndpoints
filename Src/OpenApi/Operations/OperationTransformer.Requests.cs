@@ -12,8 +12,25 @@ namespace FastEndpoints.OpenApi;
 sealed class RequestTransformState
 {
     public HashSet<string> PropsRemovedFromBody { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, OpenApiParameter> ParametersBySchemaPath { get; } = new(StringComparer.Ordinal);
     public JsonNode? RequestBodyFallbackExample { get; set; }
     public bool RequestBodyFallbackExampleCreated { get; set; }
+
+    internal void RegisterBoundParameter(PropertyInfo property, OpenApiParameter parameter, JsonNamingPolicy? namingPolicy, bool usePropertyNamingPolicy)
+    {
+        var schemaPath = PropertyNameResolver.GetSchemaPropertyName(property, namingPolicy, usePropertyNamingPolicy);
+        ParametersBySchemaPath[schemaPath] = parameter;
+
+        // FluentValidation rule keys follow JsonPropertyName; query/header names may not.
+        // Also index CLR/camelCase names so a missed target-type lookup still matches.
+        if (parameter.Name is { Length: > 0 })
+            ParametersBySchemaPath.TryAdd(parameter.Name, parameter);
+
+        var clrName = usePropertyNamingPolicy
+                          ? namingPolicy?.ConvertName(property.Name) ?? property.Name
+                          : property.Name;
+        ParametersBySchemaPath.TryAdd(clrName, parameter);
+    }
 }
 
 sealed record PromotedBodyProperty(string Name, Type Type);
@@ -301,25 +318,41 @@ sealed partial class RequestOperationTransformer(DocumentOptions docOpts, Shared
             var metadata = GetPropertyMetadata(p);
 
             AddAttributeParameters(operation, p, metadata, state, operationKey);
-            _routeParameterApplicator.AddBoundRouteParameter(operation, p, routeParameters, state, operationKey);
+            var boundToRoute = _routeParameterApplicator.AddBoundRouteParameter(operation, p, routeParameters, state, operationKey);
 
             var queryParamName = _parameterNameResolver.GetQueryName(p);
 
-            if (ShouldAddQueryParam(p, metadata, operation, queryParamName, useQueryParamsForBodylessRequest))
+            if (ShouldAddQueryParam(p, metadata, operation, queryParamName, useQueryParamsForBodylessRequest) &&
+                (!boundToRoute || IsSupplementaryQuerySource(metadata)))
             {
                 operation.RemovePropFromRequestBody(p, sharedCtx, operationKey, docOpts, NamingPolicy, state.PropsRemovedFromBody);
 
                 if (_complexQueryParameterExpander.TryAdd(operation, p, docOpts.ShortSchemaNames))
                     continue;
 
-                AddParameter(
-                    operation,
-                    queryParamName,
-                    ParameterLocation.Query,
+                state.RegisterBoundParameter(
                     p,
-                    GetDontBindRequiredness(p),
-                    docOpts.ShortSchemaNames);
+                    AddParameter(
+                        operation,
+                        queryParamName,
+                        ParameterLocation.Query,
+                        p,
+                        GetDontBindRequiredness(p),
+                        docOpts.ShortSchemaNames),
+                    NamingPolicy,
+                    docOpts.UsePropertyNamingPolicy);
+
+                continue;
             }
+
+            if (!IsQueryBoundProperty(p, metadata, useQueryParamsForBodylessRequest) ||
+                OperationParameterCollection.Find(operation, ParameterLocation.Query, queryParamName) is not { } existingQuery)
+                continue;
+
+            var schemaPath = PropertyNameResolver.GetSchemaPropertyName(p, NamingPolicy, docOpts.UsePropertyNamingPolicy);
+
+            if (!state.ParametersBySchemaPath.ContainsKey(schemaPath))
+                state.RegisterBoundParameter(p, existingQuery, NamingPolicy, docOpts.UsePropertyNamingPolicy);
         }
     }
 
@@ -343,7 +376,9 @@ sealed partial class RequestOperationTransformer(DocumentOptions docOpts, Shared
                 return;
             }
 
-            AddParameter(operation, pName, ParameterLocation.Header, p, hAttrib.IsRequired, docOpts.ShortSchemaNames);
+            var headerParam = OperationParameterCollection.Find(operation, ParameterLocation.Header, pName) ??
+                              AddParameter(operation, pName, ParameterLocation.Header, p, hAttrib.IsRequired, docOpts.ShortSchemaNames);
+            state.RegisterBoundParameter(p, headerParam, NamingPolicy, docOpts.UsePropertyNamingPolicy);
 
             if (hAttrib.IsRequired || hAttrib.RemoveFromSchema)
                 operation.RemovePropFromRequestBody(p, sharedCtx, operationKey, docOpts, NamingPolicy, state.PropsRemovedFromBody);
@@ -352,7 +387,9 @@ sealed partial class RequestOperationTransformer(DocumentOptions docOpts, Shared
         if (metadata.FromCookie is { } cAttrib)
         {
             var pName = cAttrib.CookieName ?? _parameterNameResolver.ApplyPropertyNamingPolicy(p.Name);
-            AddParameter(operation, pName, ParameterLocation.Cookie, p, cAttrib.IsRequired, docOpts.ShortSchemaNames);
+            var cookieParam = OperationParameterCollection.Find(operation, ParameterLocation.Cookie, pName) ??
+                              AddParameter(operation, pName, ParameterLocation.Cookie, p, cAttrib.IsRequired, docOpts.ShortSchemaNames);
+            state.RegisterBoundParameter(p, cookieParam, NamingPolicy, docOpts.UsePropertyNamingPolicy);
 
             if (cAttrib.IsRequired || cAttrib.RemoveFromSchema)
                 operation.RemovePropFromRequestBody(p, sharedCtx, operationKey, docOpts, NamingPolicy, state.PropsRemovedFromBody);
@@ -363,15 +400,18 @@ sealed partial class RequestOperationTransformer(DocumentOptions docOpts, Shared
             operation.RemovePropFromRequestBody(p, sharedCtx, operationKey, docOpts, NamingPolicy, state.PropsRemovedFromBody);
     }
 
-    void AddParameter(OpenApiOperation operation,
-                      string name,
-                      ParameterLocation location,
-                      PropertyInfo? prop,
-                      bool? isRequired = null,
-                      bool shortSchemaNames = false,
-                      Type? explicitType = null)
+    OpenApiParameter AddParameter(OpenApiOperation operation,
+                                  string name,
+                                  ParameterLocation location,
+                                  PropertyInfo? prop,
+                                  bool? isRequired = null,
+                                  bool shortSchemaNames = false,
+                                  Type? explicitType = null)
     {
-        OperationParameterCollection.Add(operation, _parameterFactory.Create(name, location, prop, isRequired, shortSchemaNames, explicitType));
+        var param = _parameterFactory.Create(name, location, prop, isRequired, shortSchemaNames, explicitType);
+        OperationParameterCollection.Add(operation, param);
+
+        return param;
     }
 
     static bool IsIllegalHeaderName(string name)
@@ -400,6 +440,10 @@ sealed partial class RequestOperationTransformer(DocumentOptions docOpts, Shared
                                     OpenApiOperation operation,
                                     string queryParamName,
                                     bool isBodylessRequest)
+        => IsQueryBoundProperty(prop, metadata, isBodylessRequest) &&
+           !OperationParameterCollection.Has(operation, ParameterLocation.Query, queryParamName);
+
+    static bool IsQueryBoundProperty(PropertyInfo prop, PropertyMetadata metadata, bool isBodylessRequest)
     {
         if (metadata.FromHeader is not null || metadata.FromCookie is not null)
             return false;
@@ -413,9 +457,9 @@ sealed partial class RequestOperationTransformer(DocumentOptions docOpts, Shared
         if (metadata.DontBind?.BindingSources.HasFlag(Source.QueryParam) == true)
             return false;
 
-        if (operation.Parameters?.Any(p => string.Equals(p.Name, queryParamName, StringComparison.OrdinalIgnoreCase)) == true)
-            return false;
-
         return isBodylessRequest || prop.IsDefined(Types.QueryParamAttribute);
     }
+
+    static bool IsSupplementaryQuerySource(PropertyMetadata metadata)
+        => metadata.FromClaim is { IsRequired: false } || metadata.HasPermission is { IsRequired: false };
 }

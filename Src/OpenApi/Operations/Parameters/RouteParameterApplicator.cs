@@ -16,7 +16,7 @@ sealed class RouteParameterApplicator(DocumentOptions docOpts, SharedContext sha
     internal static Dictionary<string, RouteParameterInfo> BuildLookup(List<RouteParameterInfo> routeParameters)
         => routeParameters.Select(static routeParameter => KeyValuePair.Create(routeParameter.Name, routeParameter)).ToCaseInsensitiveDictionary(routeParameters.Count);
 
-    internal void AddBoundRouteParameter(OpenApiOperation operation,
+    internal bool AddBoundRouteParameter(OpenApiOperation operation,
                                          PropertyInfo property,
                                          Dictionary<string, RouteParameterInfo> routeParameters,
                                          RequestTransformState state,
@@ -25,19 +25,32 @@ sealed class RouteParameterApplicator(DocumentOptions docOpts, SharedContext sha
         var bindName = GetPropertyMetadata(property).BindFrom?.Name ?? property.Name;
 
         if (!routeParameters.TryGetValue(bindName, out var matchingRouteParam))
-            return;
+            return false;
 
         operation.RemovePropFromRequestBody(property, sharedCtx, operationKey, docOpts, NamingPolicy, state.PropsRemovedFromBody);
 
         var appliedName = _parameterNameResolver.GetRouteName(matchingRouteParam.Name);
 
-        if (TryNormalizeExistingPathParameter(operation, matchingRouteParam.Name, appliedName, property.PropertyType))
-            return;
+        if (TryNormalizeExistingPathParameter(operation, matchingRouteParam.Name, appliedName, property.PropertyType) is { } existing)
+        {
+            state.RegisterBoundParameter(property, existing, NamingPolicy, docOpts.UsePropertyNamingPolicy);
+
+            return true;
+        }
 
         if (!OperationParameterCollection.Has(operation, ParameterLocation.Path, appliedName))
-            AddParameter(operation, appliedName, property, true);
-        else
-            OperationParameterCollection.UpdateSchema(operation, ParameterLocation.Path, appliedName, property.PropertyType, sharedCtx, docOpts.ShortSchemaNames);
+        {
+            state.RegisterBoundParameter(property, AddParameter(operation, appliedName, property, true), NamingPolicy, docOpts.UsePropertyNamingPolicy);
+
+            return true;
+        }
+
+        OperationParameterCollection.UpdateSchema(operation, ParameterLocation.Path, appliedName, property.PropertyType, sharedCtx, docOpts.ShortSchemaNames);
+
+        if (OperationParameterCollection.Find(operation, ParameterLocation.Path, appliedName) is { } updated)
+            state.RegisterBoundParameter(property, updated, NamingPolicy, docOpts.UsePropertyNamingPolicy);
+
+        return true;
     }
 
     internal void EnsureRouteParameters(OpenApiOperation operation, List<RouteParameterInfo> routeParameters)
@@ -48,20 +61,20 @@ sealed class RouteParameterApplicator(DocumentOptions docOpts, SharedContext sha
             var appliedName = _parameterNameResolver.GetRouteName(routeParam.Name);
             var resolvedType = routeParam.ConstraintType;
 
-            if (TryNormalizeExistingPathParameter(operation, routeParam.Name, appliedName, resolvedType))
+            if (TryNormalizeExistingPathParameter(operation, routeParam.Name, appliedName, resolvedType) is not null)
                 continue;
 
             AddParameter(operation, appliedName, null, true, resolvedType);
         }
     }
 
-    bool TryNormalizeExistingPathParameter(OpenApiOperation operation, string routeParamName, string appliedName, Type? schemaType)
+    OpenApiParameter? TryNormalizeExistingPathParameter(OpenApiOperation operation, string routeParamName, string appliedName, Type? schemaType)
     {
         var existing = OperationParameterCollection.Find(operation, ParameterLocation.Path, appliedName) ??
                        OperationParameterCollection.Find(operation, ParameterLocation.Path, routeParamName);
 
         if (existing is null)
-            return false;
+            return null;
 
         if (!string.Equals(existing.Name, appliedName, StringComparison.Ordinal))
             existing.Name = appliedName;
@@ -69,11 +82,14 @@ sealed class RouteParameterApplicator(DocumentOptions docOpts, SharedContext sha
         if (schemaType is not null)
             existing.Schema = schemaType.GetSchemaForType(sharedCtx, docOpts.ShortSchemaNames);
 
-        return true;
+        return existing;
     }
 
-    void AddParameter(OpenApiOperation operation, string name, PropertyInfo? prop, bool? isRequired, Type? explicitType = null)
-        => OperationParameterCollection.Add(
-            operation,
-            _parameterFactory.Create(name, ParameterLocation.Path, prop, isRequired, docOpts.ShortSchemaNames, explicitType));
+    OpenApiParameter AddParameter(OpenApiOperation operation, string name, PropertyInfo? prop, bool? isRequired, Type? explicitType = null)
+    {
+        var param = _parameterFactory.Create(name, ParameterLocation.Path, prop, isRequired, docOpts.ShortSchemaNames, explicitType);
+        OperationParameterCollection.Add(operation, param);
+
+        return param;
+    }
 }

@@ -39,9 +39,20 @@ sealed class ValidationSchemaTransformer(DocumentOptions docOpts, SharedContext 
         }
     }
 
-    public void ApplyEndpointValidation(OpenApiOperation operation, IServiceProvider services, Type? validatorType, string operationKey, string? propertyPrefix = null)
+    public void ApplyEndpointValidation(OpenApiOperation operation,
+                                        IServiceProvider services,
+                                        Type? validatorType,
+                                        string operationKey,
+                                        RequestTransformState parameterState,
+                                        string? propertyPrefix = null)
     {
-        if (validatorType is null || operation.RequestBody?.Content is not { Count: > 0 })
+        if (validatorType is null)
+            return;
+
+        var hasRequestBody = operation.RequestBody?.Content is { Count: > 0 };
+        var hasParameters = parameterState.ParametersBySchemaPath.Count > 0;
+
+        if (!hasRequestBody && !hasParameters)
             return;
 
         Initialize(services);
@@ -54,25 +65,102 @@ sealed class ValidationSchemaTransformer(DocumentOptions docOpts, SharedContext 
         if (cachedRules is null)
             return;
 
-        using var schemaApplier = new ValidationSchemaApplier(
-            sharedCtx,
-            _serviceResolver,
-            _logger,
-            _serviceResolver.CreateScope,
-            ValidationRuleCatalog.DefaultRules,
-            docOpts.UsePropertyNamingPolicy,
-            operationKey,
-            "requestBody",
-            localizeReferencedSchemas: true);
+        if (hasRequestBody)
+            ApplyRequestBodyValidation(operation, cachedRules, operationKey, propertyPrefix);
+
+        if (hasParameters)
+            ApplyParameterValidation(parameterState, cachedRules, operationKey);
+    }
+
+    void ApplyRequestBodyValidation(OpenApiOperation operation, CachedValidatorRules cachedRules, string operationKey, string? propertyPrefix)
+    {
+        using var schemaApplier = CreateSchemaApplier(operationKey, "requestBody");
         var formattedPropertyPrefix = FormatPropertyPrefix(propertyPrefix);
 
-        foreach (var content in operation.RequestBody.Content.Values)
+        foreach (var content in operation.RequestBody!.Content!.Values)
         {
             var schema = content.EnsureOperationLocalSchemaForMutation(sharedCtx, operationKey, "requestBody");
 
             if (schema is not null)
                 schemaApplier.ApplyValidatorRules(schema, cachedRules, formattedPropertyPrefix, []);
         }
+    }
+
+    void ApplyParameterValidation(RequestTransformState parameterState, CachedValidatorRules cachedRules, string operationKey)
+    {
+        var properties = new Dictionary<string, IOpenApiSchema>(parameterState.ParametersBySchemaPath.Count, StringComparer.Ordinal);
+        var paramByKey = new Dictionary<string, OpenApiParameter>(parameterState.ParametersBySchemaPath.Count, StringComparer.Ordinal);
+        var schemaByParam = new Dictionary<OpenApiParameter, OpenApiSchema>(parameterState.ParametersBySchemaPath.Count, ReferenceEqualityComparer.Instance);
+
+        foreach (var (schemaPath, param) in parameterState.ParametersBySchemaPath)
+        {
+            if (!schemaByParam.TryGetValue(param, out var schema))
+            {
+                schema = GetMutableParameterSchema(param, operationKey, schemaPath);
+
+                if (schema is null)
+                    continue;
+
+                schemaByParam[param] = schema;
+            }
+
+            properties[schemaPath] = schema;
+            paramByKey[schemaPath] = param;
+        }
+
+        if (properties.Count == 0)
+            return;
+
+        var synthetic = new OpenApiSchema
+        {
+            Type = JsonSchemaType.Object,
+            Properties = properties
+        };
+
+        using var schemaApplier = CreateSchemaApplier(operationKey, "parameters");
+        schemaApplier.ApplyValidatorRules(synthetic, cachedRules, string.Empty, []);
+
+        if (synthetic.Required is not { Count: > 0 } required)
+            return;
+
+        foreach (var name in required)
+        {
+            if (paramByKey.TryGetValue(name, out var param))
+                param.Required = true;
+        }
+    }
+
+    ValidationSchemaApplier CreateSchemaApplier(string operationKey, string schemaKey)
+        => new(
+            sharedCtx,
+            _serviceResolver!,
+            _logger,
+            _serviceResolver!.CreateScope,
+            ValidationRuleCatalog.DefaultRules,
+            docOpts.UsePropertyNamingPolicy,
+            operationKey,
+            schemaKey,
+            localizeReferencedSchemas: true);
+
+    OpenApiSchema? GetMutableParameterSchema(OpenApiParameter param, string operationKey, string schemaPath)
+    {
+        var schemaKey = $"parameter.{schemaPath}";
+
+        if (param.Schema is not null)
+            return param.Schema.EnsureSchemaForMutation(sharedCtx, operationKey, schemaKey, localized => param.Schema = localized, cloneConcreteSchema: true);
+
+        if (param.Content is not { Count: > 0 })
+            return null;
+
+        foreach (var content in param.Content.Values)
+        {
+            var schema = content.EnsureOperationLocalSchemaForMutation(sharedCtx, operationKey, schemaKey);
+
+            if (schema is not null)
+                return schema;
+        }
+
+        return null;
     }
 
     static string FormatPropertyPrefix(string? propertyPrefix)

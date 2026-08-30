@@ -36,7 +36,15 @@ public override void Configure()
 The property now serializes as a nullable array only:
 
 ```json
-"children": { "type": ["null", "array"], "items": { "$ref": "#/components/schemas/Child" } }
+"children": {
+    "type": [
+        "null",
+        "array"
+    ],
+    "items": {
+        "$ref": "#/components/schemas/Child"
+    }
+}
 ```
 
 Visible with `Microsoft.OpenApi` 2.11.0 or later.
@@ -44,5 +52,13 @@ Visible with `Microsoft.OpenApi` 2.11.0 or later.
 </details>
 
 ## Improvements 🚀
+
+<details><summary>FluentValidation rules now apply to OpenAPI query, path, header, and cookie parameters</summary>
+
+`FastEndpoints.OpenApi` previously applied validator constraints only to request body schemas. Bodyless GET/HEAD endpoints (and mixed POST properties marked `[QueryParam]` / `[FromHeader]` / `[FromCookie]`) therefore omitted `required`, `minLength`, patterns, and numeric ranges from the generated document.
+
+Those rules now apply to DTO-bound operation parameters as well, using the same conditional-rule behavior as request bodies. Client generators that derive types from parameters will now see the constraints.
+
+</details>
 
 ## Minor Breaking Changes ⚠️
